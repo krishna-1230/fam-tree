@@ -1,9 +1,12 @@
 ﻿"use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- force-graph mutates node and link objects at runtime beyond the static app model. */
+
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import ForceGraph3D from "react-force-graph-3d";
 import { useWindowSize } from "../hooks/useWindowSize";
 import api from "../lib/api";
+import type { GraphData } from "../lib/types";
 import { useToast } from "./Toast";
 import * as d3Force from "d3-force";
 import * as THREE from "three";
@@ -47,12 +50,12 @@ export default function GraphCanvas({
   onFocusHandled,
   onRefresh,
 }: {
-  data: any;
+  data: GraphData;
   onNodeClick: (node: any) => void;
   selectedNodeId: string | null;
   focusNodeId: string | null;
   onFocusHandled: () => void;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
 }) {
   const fgRef = useRef<any>(null);
   const size  = useWindowSize();
@@ -496,6 +499,11 @@ export default function GraphCanvas({
   const handleDeleteLink = useCallback(
     async () => {
       if (!linkPopup) return;
+      if (linkPopup.link.relationship_source === "inferred") {
+        toast("Derived relationships can only be changed by editing their explicit source links", "info");
+        setLinkPopup(null);
+        return;
+      }
       setDeletingLink(true);
       try {
         const link = linkPopup.link;
@@ -833,6 +841,9 @@ export default function GraphCanvas({
             <p className="text-[11px] text-slate-500 mb-3 uppercase tracking-wider font-semibold">
               {linkPopup.link.type ?? "relationship"}
             </p>
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+              {linkPopup.link.relationship_source === "inferred" ? "Derived link" : "Explicit link"}
+            </p>
             <div className="flex gap-2">
               <button
                 onClick={() => setLinkPopup(null)}
@@ -842,11 +853,11 @@ export default function GraphCanvas({
               </button>
               <button
                 onClick={handleDeleteLink}
-                disabled={deletingLink}
+                disabled={deletingLink || linkPopup.link.relationship_source === "inferred"}
                 className="flex-1 py-1.5 text-xs font-semibold rounded-lg bg-red-600/80 hover:bg-red-500 text-white transition-colors disabled:opacity-40 flex items-center justify-center gap-1.5"
               >
                 <Trash2 className="w-3 h-3" />
-                {deletingLink ? "Deleting…" : "Delete"}
+                {linkPopup.link.relationship_source === "inferred" ? "Locked" : deletingLink ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>

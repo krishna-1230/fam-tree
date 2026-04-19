@@ -50,7 +50,7 @@ func setupIndexes() {
 	defer cancel()
 
 	relationshipsCol := GetCollection("relationships")
-	
+
 	_, err := relationshipsCol.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{
 			Keys: bson.D{
@@ -60,6 +60,13 @@ func setupIndexes() {
 		},
 		{
 			Keys: bson.D{
+				{Key: "to_person_id", Value: 1},
+				{Key: "type", Value: 1},
+			},
+		},
+		{
+			Keys: bson.D{
+				{Key: "from_person_id", Value: 1},
 				{Key: "to_person_id", Value: 1},
 				{Key: "type", Value: 1},
 			},

@@ -1,105 +1,152 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
-import { X, Plus, Trash2, Pencil, Check, ChevronRight, Unlink } from "lucide-react";
-import api from "../lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { Check, ChevronRight, Pencil, Plus, Trash2, Unlink, X } from "lucide-react";
+import { familyApi } from "../lib/familyApi";
+import type { Gender, PersonDetail, RelatedPerson } from "../lib/types";
+import DialogShell from "./DialogShell";
 import { useToast } from "./Toast";
 
-interface RelatedPerson {
-  id: string;
-  name: string;
-  gender: string;
-  date_of_birth?: string;
-  relationship_id: string;
-}
+function getErrorMessage(error: unknown, fallback: string) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "response" in error &&
+    error.response &&
+    typeof error.response === "object" &&
+    "data" in error.response &&
+    error.response.data &&
+    typeof error.response.data === "object" &&
+    "error" in error.response.data &&
+    typeof error.response.data.error === "string"
+  ) {
+    return error.response.data.error;
+  }
 
-interface PersonDetail {
-  id: string;
-  name: string;
-  gender: string;
-  date_of_birth?: string;
-  parents: RelatedPerson[];
-  children: RelatedPerson[];
-  spouses: RelatedPerson[];
-  siblings: RelatedPerson[];
+  return fallback;
 }
 
 interface Props {
   personData: PersonDetail;
   onClose: () => void;
-  onRefresh: () => void;
-  onDelete: () => void;
+  onRefresh: () => Promise<void>;
+  onDelete: () => Promise<void>;
   onNavigate: (personId: string) => void;
 }
 
-const inputCls = "w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-sm text-white outline-none transition-colors";
-const genderColor = (g: string) =>
-  g === "male"   ? "bg-blue-900/50 text-blue-400"   :
-  g === "female" ? "bg-pink-900/50 text-pink-400"   :
-                   "bg-slate-700   text-slate-300";
-const initials = (name: string) =>
-  name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
-const fmtDate = (s?: string) => s ? new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "Unknown";
-const fmtYear = (s?: string) => s ? new Date(s).getFullYear().toString() : null;
-const toIsoDate = (s?: string) => s ? s.slice(0, 10) : "";
+const inputCls = "w-full rounded-2xl border border-white/10 bg-slate-950/90 px-3.5 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400/35";
 
-// ── Quick-add inline form ──────────────────────────────────
-function QuickAddForm({ role, personData, onComplete, onCancel }: { role: string; personData: PersonDetail; onComplete: () => void; onCancel: () => void }) {
+const genderColor = (gender: Gender) =>
+  gender === "male"
+    ? "bg-cyan-500/12 text-cyan-100"
+    : gender === "female"
+      ? "bg-rose-500/12 text-rose-100"
+      : "bg-white/8 text-slate-300";
+
+const relationshipTone = (type: string) =>
+  type === "father"
+    ? "bg-cyan-500/10 text-cyan-100"
+    : type === "mother"
+      ? "bg-rose-500/10 text-rose-100"
+      : type === "spouse"
+        ? "bg-violet-500/10 text-violet-100"
+        : "bg-amber-500/10 text-amber-100";
+
+const initials = (name: string) =>
+  name
+    .split(" ")
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+const formatDate = (value?: string) =>
+  value ? new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "Unknown";
+
+const formatYear = (value?: string) => (value ? new Date(value).getFullYear().toString() : null);
+const toIsoDate = (value?: string) => (value ? value.slice(0, 10) : "");
+
+function QuickAddForm({
+  role,
+  personData,
+  onComplete,
+  onCancel,
+}: {
+  role: string;
+  personData: PersonDetail;
+  onComplete: () => Promise<void>;
+  onCancel: () => void;
+}) {
   const [name, setName] = useState("");
-  const [gender, setGender] = useState(role === "mother" ? "female" : "male");
+  const [gender, setGender] = useState<Gender>(role === "mother" ? "female" : "male");
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) {
+      return;
+    }
+
     setLoading(true);
     try {
-      const { data: np } = await api.post("/api/persons", { name: name.trim(), gender });
-      const newId = np.id;
-      const srcId = personData.id;
+      const created = await familyApi.createPerson({ name: name.trim(), gender });
+      const newId = created.id;
+      const sourceId = personData.id;
 
       if (role === "parent") {
-        const type = gender === "female" ? "mother" : "father";
-        await api.post("/api/relationships", { from_person_id: newId, to_person_id: srcId, type });
+        await familyApi.createRelationship({
+          from_person_id: newId,
+          to_person_id: sourceId,
+          type: gender === "female" ? "mother" : "father",
+        });
       } else if (role === "child") {
-        const type = personData.gender === "female" ? "mother" : "father";
-        await api.post("/api/relationships", { from_person_id: srcId, to_person_id: newId, type });
+        await familyApi.createRelationship({
+          from_person_id: sourceId,
+          to_person_id: newId,
+          type: personData.gender === "female" ? "mother" : "father",
+        });
       } else if (role === "spouse") {
-        await api.post("/api/relationships", { from_person_id: srcId, to_person_id: newId, type: "spouse" });
+        await familyApi.createRelationship({ from_person_id: sourceId, to_person_id: newId, type: "spouse" });
       } else if (role === "sibling") {
-        await api.post("/api/relationships", { from_person_id: srcId, to_person_id: newId, type: "sibling" });
+        await familyApi.createRelationship({ from_person_id: sourceId, to_person_id: newId, type: "sibling" });
       }
 
       toast(`${name.trim()} added`, "success");
-      onComplete();
-    } catch (err: any) {
-      toast(err.response?.data?.error ?? "Failed to add relative", "error");
+      await onComplete();
+    } catch (error: unknown) {
+      toast(getErrorMessage(error, "Failed to add relative"), "error");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mb-2 p-3 bg-slate-800/50 rounded-xl border border-slate-700/50">
-      <div className="flex gap-2 mb-2">
+    <form onSubmit={handleSubmit} className="rounded-[24px] border border-white/8 bg-white/5 p-4">
+      <div className="mb-3 flex gap-2">
         <input
-          autoFocus required placeholder="Full name…" value={name}
-          onChange={e => setName(e.target.value)}
-          className="flex-1 min-w-0 bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-2.5 py-1.5 text-sm text-white outline-none transition-colors"
+          autoFocus
+          required
+          placeholder="Full name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          className={`${inputCls} flex-1`}
         />
         <select
-          value={gender} onChange={e => setGender(e.target.value)}
-          className="bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-2 py-1.5 text-sm text-white outline-none transition-colors"
+          value={gender}
+          onChange={(event) => setGender(event.target.value as Gender)}
+          className="rounded-2xl border border-white/10 bg-slate-950/90 px-3 py-3 text-sm text-slate-100 outline-none"
         >
-          <option value="male">M</option>
-          <option value="female">F</option>
-          <option value="other">?</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+          <option value="other">Other</option>
         </select>
       </div>
-      <div className="flex gap-2 justify-end">
-        <button type="button" onClick={onCancel} className="text-xs px-2 py-1 text-slate-500 hover:text-white transition-colors">Cancel</button>
-        <button type="submit" disabled={loading} className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-medium transition-colors disabled:opacity-50">
+      <div className="flex items-center justify-end gap-2">
+        <button type="button" onClick={onCancel} className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-xs text-slate-300 transition hover:bg-white/8">
+          Cancel
+        </button>
+        <button type="submit" disabled={loading} className="rounded-2xl bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:opacity-50">
           {loading ? "Saving…" : "Add"}
         </button>
       </div>
@@ -107,41 +154,53 @@ function QuickAddForm({ role, personData, onComplete, onCancel }: { role: string
   );
 }
 
-// ── Main component ─────────────────────────────────────────
 export default function DetailPanel({ personData, onClose, onRefresh, onDelete, onNavigate }: Props) {
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ name: "", gender: "", dob: "" });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [activeQuickAdd, setActiveQuickAdd] = useState<string | null>(null);
   const [deletingRelId, setDeletingRelId] = useState<string | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", gender: "male" as Gender, dob: "" });
 
-  // Reset state when switching persons
   useEffect(() => {
     setIsEditing(false);
     setActiveQuickAdd(null);
-    setEditForm({ name: personData.name, gender: personData.gender, dob: toIsoDate(personData.date_of_birth) });
-  }, [personData.id]);
+    setConfirmDeleteOpen(false);
+    setEditForm({
+      name: personData.name,
+      gender: personData.gender,
+      dob: toIsoDate(personData.date_of_birth),
+    });
+  }, [personData]);
 
-  const startEdit = () => {
-    setEditForm({ name: personData.name, gender: personData.gender, dob: toIsoDate(personData.date_of_birth) });
-    setIsEditing(true);
-  };
+  const counts = useMemo(
+    () => [
+      { label: "Parents", value: personData.parents.length },
+      { label: "Children", value: personData.children.length },
+      { label: "Spouses", value: personData.spouses.length },
+      { label: "Siblings", value: personData.siblings.length },
+    ],
+    [personData.children.length, personData.parents.length, personData.siblings.length, personData.spouses.length],
+  );
 
-  const handleSaveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editForm.name.trim()) return;
+  const handleSaveEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editForm.name.trim()) {
+      return;
+    }
+
     setSaving(true);
     try {
-      await api.put(`/api/persons/${personData.id}`, {
+      await familyApi.updatePerson(personData.id, {
         name: editForm.name.trim(),
         gender: editForm.gender,
         date_of_birth: editForm.dob ? new Date(editForm.dob).toISOString() : undefined,
       });
       toast("Changes saved", "success");
       setIsEditing(false);
-      onRefresh();
+      await onRefresh();
     } catch {
       toast("Failed to save changes", "error");
     } finally {
@@ -150,12 +209,12 @@ export default function DetailPanel({ personData, onClose, onRefresh, onDelete, 
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Delete "${personData.name}" and all their relationships? This cannot be undone.`)) return;
     setDeleting(true);
     try {
-      await api.delete(`/api/persons/${personData.id}`);
-      toast(`${personData.name} deleted`);
-      onDelete();
+      await familyApi.deletePerson(personData.id);
+      toast(`${personData.name} deleted`, "success");
+      setConfirmDeleteOpen(false);
+      await onDelete();
     } catch {
       toast("Failed to delete person", "error");
     } finally {
@@ -163,15 +222,18 @@ export default function DetailPanel({ personData, onClose, onRefresh, onDelete, 
     }
   };
 
-  const handleDeleteRelationship = async (relId: string) => {
-    if (!relId || relId === "000000000000000000000000") return;
-    setDeletingRelId(relId);
+  const handleDeleteRelationship = async (person: RelatedPerson) => {
+    if (!person.relationship_id || person.relationship_source === "inferred") {
+      return;
+    }
+
+    setDeletingRelId(person.relationship_id);
     try {
-      await api.delete(`/api/relationships/${relId}`);
-      toast("Relationship removed");
-      onRefresh();
-    } catch {
-      toast("Failed to remove relationship", "error");
+      await familyApi.deleteRelationship(person.relationship_id);
+      toast("Relationship removed", "success");
+      await onRefresh();
+    } catch (error: unknown) {
+      toast(getErrorMessage(error, "Failed to remove relationship"), "error");
     } finally {
       setDeletingRelId(null);
     }
@@ -179,151 +241,213 @@ export default function DetailPanel({ personData, onClose, onRefresh, onDelete, 
 
   const renderSection = (title: string, role: string, list: RelatedPerson[]) => {
     const isAdding = activeQuickAdd === role;
+
     return (
-      <div className="mb-5">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{title}</h3>
+      <section className="space-y-3 rounded-[28px] border border-white/8 bg-white/[0.035] p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">{title}</p>
+            <p className="mt-1 text-xs text-slate-500">{list.length === 0 ? "No recorded links yet" : `${list.length} visible relationship${list.length === 1 ? "" : "s"}`}</p>
+          </div>
           <button
+            type="button"
             onClick={() => setActiveQuickAdd(isAdding ? null : role)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-white/14 hover:bg-white/8"
           >
-            <Plus className="w-3 h-3" /> Add
+            <Plus className="h-3.5 w-3.5" />
+            Add
           </button>
         </div>
 
-        {isAdding && (
+        {isAdding ? (
           <QuickAddForm
-            role={role} personData={personData}
+            role={role}
+            personData={personData}
             onCancel={() => setActiveQuickAdd(null)}
-            onComplete={() => { setActiveQuickAdd(null); onRefresh(); }}
+            onComplete={async () => {
+              setActiveQuickAdd(null);
+              await onRefresh();
+            }}
           />
-        )}
+        ) : null}
 
-        {(!list || list.length === 0) && !isAdding && (
-          <p className="text-xs text-slate-600 italic px-1">None</p>
-        )}
+        {list.length === 0 && !isAdding ? <p className="rounded-2xl border border-dashed border-white/8 px-4 py-3 text-sm text-slate-500">No entries yet.</p> : null}
 
-        <div className="flex flex-col gap-1">
-          {list?.map(p => (
-            <div
-              key={p.relationship_id || p.id}
-              onClick={() => onNavigate(p.id)}
-              className="group flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-800/30 hover:bg-slate-800 border border-transparent hover:border-slate-700/50 cursor-pointer transition-all"
-            >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold shrink-0 ${genderColor(p.gender)}`}>
-                {initials(p.name)}
+        <div className="space-y-2">
+          {list.map((person) => {
+            const isDerived = person.relationship_source === "inferred";
+            return (
+              <div
+                key={person.relationship_id || person.id}
+                onClick={() => onNavigate(person.id)}
+                className="group flex cursor-pointer items-center gap-3 rounded-[22px] border border-transparent bg-slate-900/45 px-3 py-3 transition hover:border-white/10 hover:bg-slate-900/72"
+              >
+                <div className={`flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-bold ${genderColor(person.gender)}`}>
+                  {initials(person.name)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-100">{person.name}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    {person.relationship_type ? (
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${relationshipTone(person.relationship_type)}`}>
+                        {person.relationship_type}
+                      </span>
+                    ) : null}
+                    {isDerived ? (
+                      <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-100">
+                        Derived
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100">
+                        Explicit
+                      </span>
+                    )}
+                    {formatYear(person.date_of_birth) ? <span className="text-xs text-slate-500">{formatYear(person.date_of_birth)}</span> : null}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                  {!isDerived ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleDeleteRelationship(person);
+                      }}
+                      disabled={deletingRelId === person.relationship_id}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+                      title="Remove explicit relationship"
+                    >
+                      <Unlink className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                  <ChevronRight className="h-4 w-4 text-slate-600" />
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-slate-200 truncate">{p.name}</p>
-                {fmtYear(p.date_of_birth) && (
-                  <p className="text-[11px] text-slate-600">{fmtYear(p.date_of_birth)}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                {p.relationship_id && p.relationship_id !== "000000000000000000000000" && (
-                  <button
-                    onClick={e => { e.stopPropagation(); handleDeleteRelationship(p.relationship_id); }}
-                    disabled={deletingRelId === p.relationship_id}
-                    className="p-1 text-slate-500 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-40"
-                    title="Remove relationship"
-                  >
-                    <Unlink className="w-3 h-3" />
-                  </button>
-                )}
-                <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
-      </div>
+      </section>
     );
   };
 
   return (
-    <div className="panel-enter w-80 bg-slate-900 border-l border-slate-800 h-full flex flex-col shrink-0 shadow-2xl">
-      {/* Header */}
-      <div className="px-4 pt-4 pb-3 border-b border-slate-800 shrink-0">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${genderColor(personData.gender)}`}>
-              {initials(personData.name)}
+    <>
+      <aside className="panel-enter h-full w-[360px] shrink-0 border-l border-white/8 bg-slate-950/84 shadow-[0_24px_80px_rgba(2,6,23,0.45)] backdrop-blur-2xl xl:w-[390px]">
+        <div className="flex h-full flex-col">
+          <div className="border-b border-white/8 px-5 pb-5 pt-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className={`flex h-14 w-14 items-center justify-center rounded-[22px] text-base font-bold ${genderColor(personData.gender)}`}>
+                  {initials(personData.name)}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-xl font-semibold tracking-tight text-slate-50">{personData.name}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${genderColor(personData.gender)}`}>
+                      {personData.gender}
+                    </span>
+                    {personData.date_of_birth ? <span className="text-xs text-slate-400">Born {formatDate(personData.date_of_birth)}</span> : null}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                {!isEditing ? (
+                  <button type="button" onClick={() => setIsEditing(true)} className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/5 text-slate-300 transition hover:bg-white/8 hover:text-white" title="Edit person">
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                ) : null}
+                <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/8 bg-white/5 text-slate-300 transition hover:bg-white/8 hover:text-white" title="Close panel">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
+
             {isEditing ? (
-              <form onSubmit={handleSaveEdit} className="flex-1 min-w-0">
+              <form onSubmit={handleSaveEdit} className="space-y-3 rounded-[24px] border border-cyan-400/18 bg-cyan-500/[0.04] p-4">
                 <input
-                  autoFocus value={editForm.name}
-                  onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
-                  className="w-full bg-slate-950 border border-blue-500 rounded-xl px-2.5 py-1.5 text-sm text-white outline-none mb-1.5"
+                  autoFocus
+                  value={editForm.name}
+                  onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))}
+                  className={inputCls}
                 />
-                <div className="flex gap-1.5 mb-1.5">
+                <div className="grid grid-cols-2 gap-2">
                   <select
                     value={editForm.gender}
-                    onChange={e => setEditForm(f => ({ ...f, gender: e.target.value }))}
-                    className="flex-1 bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-2 py-1.5 text-xs text-white outline-none"
+                    onChange={(event) => setEditForm((current) => ({ ...current, gender: event.target.value as Gender }))}
+                    className={inputCls}
                   >
                     <option value="male">Male</option>
                     <option value="female">Female</option>
                     <option value="other">Other</option>
                   </select>
                   <input
-                    type="date" value={editForm.dob}
-                    onChange={e => setEditForm(f => ({ ...f, dob: e.target.value }))}
-                    className="flex-1 bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-2 py-1.5 text-xs text-white outline-none"
+                    type="date"
+                    value={editForm.dob}
+                    onChange={(event) => setEditForm((current) => ({ ...current, dob: event.target.value }))}
+                    className={inputCls}
                   />
                 </div>
-                <div className="flex gap-1.5">
-                  <button type="button" onClick={() => setIsEditing(false)} className="flex-1 text-xs py-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">Cancel</button>
-                  <button type="submit" disabled={saving} className="flex-1 text-xs py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
-                    <Check className="w-3 h-3" />{saving ? "Saving…" : "Save"}
+                <div className="flex items-center justify-end gap-2">
+                  <button type="button" onClick={() => setIsEditing(false)} className="rounded-2xl border border-white/8 bg-white/5 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/8">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={saving} className="inline-flex items-center gap-2 rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:opacity-50">
+                    <Check className="h-4 w-4" />
+                    {saving ? "Saving…" : "Save changes"}
                   </button>
                 </div>
               </form>
-            ) : (
-              <div className="min-w-0">
-                <h2 className="font-bold text-white leading-tight truncate">{personData.name}</h2>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className={`text-[10px] font-semibold capitalize px-2 py-0.5 rounded-md ${genderColor(personData.gender)}`}>
-                    {personData.gender}
-                  </span>
-                  {personData.date_of_birth && (
-                    <span className="text-[10px] text-slate-500">b. {fmtDate(personData.date_of_birth)}</span>
-                  )}
+            ) : null}
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {counts.map((item) => (
+                <div key={item.label} className="rounded-[20px] border border-white/8 bg-white/5 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">{item.label}</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-50">{item.value}</p>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
           </div>
-          <div className="flex items-center gap-0.5 ml-1 shrink-0">
-            {!isEditing && (
-              <button onClick={startEdit} className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-xl transition-colors" title="Edit">
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <button onClick={onClose} className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-xl transition-colors" title="Close">
-              <X className="w-4 h-4" />
+
+          <div className="custom-scrollbar flex-1 space-y-4 overflow-y-auto px-5 py-5">
+            {renderSection("Parents", "parent", personData.parents ?? [])}
+            {renderSection("Spouses", "spouse", personData.spouses ?? [])}
+            {renderSection("Children", "child", personData.children ?? [])}
+            {renderSection("Siblings", "sibling", personData.siblings ?? [])}
+          </div>
+
+          <div className="border-t border-white/8 px-5 py-4">
+            <button type="button" onClick={() => setConfirmDeleteOpen(true)} disabled={deleting} className="inline-flex w-full items-center justify-center gap-2 rounded-[20px] border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 transition hover:bg-red-500/14 disabled:opacity-50">
+              <Trash2 className="h-4 w-4" />
+              Delete person
             </button>
           </div>
         </div>
-      </div>
+      </aside>
 
-      {/* Relationship Sections */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
-        {renderSection("Parents",  "parent",  personData.parents  ?? [])}
-        {renderSection("Spouses",  "spouse",  personData.spouses  ?? [])}
-        {renderSection("Children", "child",   personData.children ?? [])}
-        {renderSection("Siblings", "sibling", personData.siblings ?? [])}
-      </div>
-
-      {/* Footer */}
-      <div className="px-4 py-3 border-t border-slate-800 shrink-0">
-        <button
-          onClick={handleDelete}
-          disabled={deleting}
-          className="flex items-center gap-2 px-3 py-2 w-full rounded-xl text-xs font-medium text-red-500 hover:bg-red-900/20 hover:text-red-400 border border-transparent hover:border-red-900/30 transition-all disabled:opacity-50"
+      {confirmDeleteOpen ? (
+        <DialogShell
+          title={`Delete ${personData.name}?`}
+          description="This removes the person and rebuilds the graph from the remaining explicit relationships. This cannot be undone."
+          onClose={() => setConfirmDeleteOpen(false)}
+          maxWidthClassName="max-w-lg"
         >
-          <Trash2 className="w-3.5 h-3.5" />
-          {deleting ? "Deleting…" : `Delete ${personData.name}`}
-        </button>
-      </div>
-    </div>
+          <div className="space-y-5">
+            <div className="rounded-[24px] border border-red-500/18 bg-red-500/[0.05] p-4 text-sm leading-6 text-slate-300">
+              <p className="font-medium text-slate-100">Before continuing</p>
+              <p className="mt-2">Explicit links involving this person are removed. Any derived links will be recalculated from what remains.</p>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setConfirmDeleteOpen(false)} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/8">
+                Cancel
+              </button>
+              <button type="button" onClick={() => void handleDelete()} disabled={deleting} className="rounded-2xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-400 disabled:opacity-50">
+                {deleting ? "Deleting…" : "Delete permanently"}
+              </button>
+            </div>
+          </div>
+        </DialogShell>
+      ) : null}
+    </>
   );
 }

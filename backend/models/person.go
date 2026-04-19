@@ -18,7 +18,9 @@ type Person struct {
 // connecting them to the queried person.
 type RelatedPerson struct {
 	Person
-	RelationshipID primitive.ObjectID `json:"relationship_id"`
+	RelationshipID     primitive.ObjectID `json:"relationship_id"`
+	RelationshipType   string             `json:"relationship_type"`
+	RelationshipSource RelationshipSource `json:"relationship_source"`
 }
 
 type PersonDetailResponse struct {

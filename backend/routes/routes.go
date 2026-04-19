@@ -2,6 +2,7 @@ package routes
 
 import (
 	"famtre-backend/controllers"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,6 +29,8 @@ func SetupRoutes(r *gin.Engine) {
 		api.POST("/graph/layout/optimize", controllers.OptimizeGraphLayout)
 
 		// Seed
-		api.POST("/seed", controllers.SeedData)
+		if os.Getenv("ENABLE_SEED_ENDPOINT") == "true" {
+			api.POST("/seed", controllers.SeedData)
+		}
 	}
 }

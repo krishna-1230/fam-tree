@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 
 	"famtre-backend/db"
 	"famtre-backend/routes"
@@ -25,9 +26,19 @@ func main() {
 
 	// CORS config
 	config := cors.DefaultConfig()
-	config.AllowAllOrigins = true
+	allowedOrigins := []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+	if envOrigins := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS")); envOrigins != "" {
+		allowedOrigins = allowedOrigins[:0]
+		for _, origin := range strings.Split(envOrigins, ",") {
+			trimmed := strings.TrimSpace(origin)
+			if trimmed != "" {
+				allowedOrigins = append(allowedOrigins, trimmed)
+			}
+		}
+	}
+	config.AllowOrigins = allowedOrigins
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept"}
+	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
 	r.Use(cors.New(config))
 
 	// Setup Routes

@@ -1,9 +1,12 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- force-graph mutates node and link objects at runtime beyond the static app model. */
+
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import { useWindowSize } from "../hooks/useWindowSize";
 import api from "../lib/api";
+import type { GraphData } from "../lib/types";
 import { useToast } from "./Toast";
 
 import { ZoomIn, ZoomOut, Maximize2, RefreshCcw, Sparkles } from "lucide-react";
@@ -96,12 +99,12 @@ export default function GraphCanvas2D({
   onFocusHandled,
   onRefresh,
 }: {
-  data: any;
+  data: GraphData;
   onNodeClick: (node: any) => void;
   selectedNodeId: string | null;
   focusNodeId: string | null;
   onFocusHandled: () => void;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
 }) {
   const fgRef = useRef<any>(null);
   const size = useWindowSize();
@@ -355,13 +358,15 @@ export default function GraphCanvas2D({
     return () => cancelAnimationFrame(raf);
   }, [hoverNode]);
 
+  const floatingNodeId = floatingMenu ? String(floatingMenu.node.id) : null;
+
   useEffect(() => {
-    if (!floatingMenu) return;
+    if (!floatingNodeId) return;
 
     let raf: number;
     const tick = () => {
       if (!fgRef.current) return;
-      const node = displayGraph.nodes.find((n: any) => String(n.id) === String(floatingMenu.node.id));
+      const node = displayGraph.nodes.find((n: any) => String(n.id) === floatingNodeId);
       if (node?.x !== undefined && node?.y !== undefined) {
         const c = fgRef.current.graph2ScreenCoords(node.x, node.y);
         setFloatingMenu((prev) => (prev ? { ...prev, sx: c.x, sy: c.y } : null));
@@ -370,7 +375,7 @@ export default function GraphCanvas2D({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [displayGraph.nodes, floatingMenu?.node?.id]);
+  }, [displayGraph.nodes, floatingNodeId]);
 
   useEffect(() => {
     if (!focusNodeId || !fgRef.current) return;
@@ -812,13 +817,6 @@ export default function GraphCanvas2D({
 
       <div className="absolute right-6 bottom-6 z-10 flex flex-col gap-2">
         <button
-          onClick={() => (window.location.href = "/three")}
-          className="w-auto h-10 px-4 bg-violet-900/60 hover:bg-violet-800/80 border border-violet-300/30 backdrop-blur-xl rounded-2xl text-violet-200 flex items-center justify-center font-bold text-sm shadow-[0_0_15px_rgba(139,92,246,0.25)] transition-all hover:scale-105"
-          title="Switch route"
-        >
-          Switch to 3D
-        </button>
-        <button
           onClick={() => zoomBy(0.72)}
           className="w-10 h-10 bg-slate-900/65 hover:bg-slate-800/85 border border-white/10 backdrop-blur-xl rounded-2xl text-white flex items-center justify-center shadow-lg transition-all hover:scale-105"
           title="Zoom in"
@@ -914,7 +912,7 @@ export default function GraphCanvas2D({
             </div>
             <div>
               <p className="text-slate-300 text-lg font-bold tracking-tight">No family members yet</p>
-              <p className="text-slate-500 text-sm mt-1.5 font-medium">Click "+ Person" in the toolbar to get started</p>
+              <p className="text-slate-500 text-sm mt-1.5 font-medium">Click &quot;+ Person&quot; in the toolbar to get started</p>
             </div>
           </div>
         </div>
